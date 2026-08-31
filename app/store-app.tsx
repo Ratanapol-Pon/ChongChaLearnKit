@@ -41,19 +41,25 @@ function initials(name: string) {
 export default function StoreApp() {
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+  const [needsPassword, setNeedsPassword] = useState(false);
   const configured = isSupabaseConfigured();
 
   useEffect(() => {
     if (!configured) return;
+    const linkType = new URLSearchParams(window.location.hash.slice(1)).get('type')
+      ?? new URLSearchParams(window.location.search).get('type');
+    const linkRequiresPassword = linkType === 'invite' || linkType === 'recovery';
     const supabase = getSupabaseBrowserClient();
     let active = true;
     void supabase.auth.getSession().then(({ data }) => {
       if (active) {
+        setNeedsPassword(linkRequiresPassword);
         setUser(data.session?.user ?? null);
         setAuthReady(true);
       }
     });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') setNeedsPassword(true);
       setUser(session?.user ?? null);
       setAuthReady(true);
     });
@@ -66,6 +72,7 @@ export default function StoreApp() {
   if (!configured) return <ConfigurationNotice />;
   if (!authReady) return <div className="auth-screen"><span className="spinner" /><p>กำลังตรวจสอบการเข้าสู่ระบบ...</p></div>;
   if (!user) return <LoginScreen />;
+  if (needsPassword) return <PasswordSetupScreen onComplete={() => setNeedsPassword(false)} />;
 
   return <StoreWorkspace displayName={user.email ?? 'พนักงานร้าน'} onSignOut={() => getSupabaseBrowserClient().auth.signOut()} />;
 }
@@ -217,6 +224,46 @@ function LoginScreen() {
         <button className="primary-button" disabled={submitting}>{submitting ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}</button>
       </form>
       <small className="login-help">ติดต่อเจ้าของร้านหากยังไม่มีบัญชีหรือจำรหัสผ่านไม่ได้</small>
+    </section>
+  </main>;
+}
+
+function PasswordSetupScreen({ onComplete }: { onComplete: () => void }) {
+  const [message, setMessage] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage('');
+    const values = new FormData(event.currentTarget);
+    const password = String(values.get('password') ?? '');
+    const confirmation = String(values.get('confirmation') ?? '');
+    if (password !== confirmation) {
+      setMessage('รหัสผ่านทั้งสองช่องไม่ตรงกัน');
+      setSubmitting(false);
+      return;
+    }
+    const { error } = await getSupabaseBrowserClient().auth.updateUser({ password });
+    if (error) {
+      setMessage('ตั้งรหัสผ่านไม่สำเร็จ กรุณาเปิดลิงก์เชิญใหม่อีกครั้ง');
+      setSubmitting(false);
+      return;
+    }
+    window.history.replaceState({}, '', '/');
+    onComplete();
+  }
+
+  return <main className="login-page">
+    <section className="login-card">
+      <div className="brand login-brand"><span className="brand-mark">ช</span><div><strong>ชงชา ออเดอร์</strong><small>ระบบจัดการออเดอร์รายเดือน</small></div></div>
+      <div className="login-copy"><p className="eyebrow">เปิดใช้งานบัญชีพนักงาน</p><h1>ตั้งรหัสผ่าน</h1><p>สร้างรหัสผ่านอย่างน้อย 8 ตัวอักษรเพื่อเริ่มใช้งาน</p></div>
+      <form onSubmit={submit} className="login-form">
+        <label><span>รหัสผ่านใหม่</span><input name="password" type="password" autoComplete="new-password" required minLength={8} autoFocus /></label>
+        <label><span>ยืนยันรหัสผ่านใหม่</span><input name="confirmation" type="password" autoComplete="new-password" required minLength={8} /></label>
+        {message && <p className="login-error" role="alert">{message}</p>}
+        <button className="primary-button" disabled={submitting}>{submitting ? 'กำลังบันทึก...' : 'ตั้งรหัสผ่านและเข้าใช้งาน'}</button>
+      </form>
     </section>
   </main>;
 }

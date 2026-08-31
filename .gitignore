@@ -28,9 +28,12 @@ yarn-error.log*
 
 # local environment
 .env*
+!.env.example
 
 # deployment and generated files
 .vercel
+.netlify
+supabase/.temp
 next-env.d.ts
 *.tsbuildinfo
 /dist/

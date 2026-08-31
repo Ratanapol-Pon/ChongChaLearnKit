@@ -1,21 +1,18 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-
-type Product = { id: number; productCode: number; productName: string };
-type BasicItem = { productId: number; quantity: number };
-type OrderItem = BasicItem & { productCode: number; productName: string };
-type Customer = {
-  id: number; name: string; phone: string; address: string; mapUrl: string;
-  preferredCallDay: number; preferredDeliveryDay: number; notes: string; usualItems: BasicItem[];
-};
-type Order = {
-  id: number; customerId: number; orderMonth: string; status: OrderStatus;
-  nextCallAt: string; deliveryDate: string; contactNote: string; confirmedAt: string | null;
-  customerName: string; phone: string; address: string; mapUrl: string; items: OrderItem[];
-};
-type OrderStatus = 'draft' | 'call_again' | 'confirmed' | 'skipped';
-type StoreData = { month: string; customers: Customer[]; products: Product[]; orders: Order[] };
+import type { User } from '@supabase/supabase-js';
+import { getSupabaseBrowserClient, isSupabaseConfigured } from '@/lib/supabase';
+import {
+  loadStoreData,
+  storeRequest,
+  type BasicItem,
+  type Customer,
+  type Order,
+  type OrderStatus,
+  type Product,
+  type StoreData,
+} from '@/lib/store';
 type Tab = 'dashboard' | 'customers' | 'orders' | 'products' | 'delivery';
 type Modal =
   | { kind: 'customer'; customer?: Customer }
@@ -41,17 +38,39 @@ function initials(name: string) {
   return name.replace(/\s+/g, '').slice(0, 2) || 'ลค';
 }
 
-async function storeRequest(operation: string, payload: Record<string, unknown> = {}) {
-  const response = await fetch('/api/store', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ operation, ...payload }),
-  });
-  const result = await response.json() as { error?: string };
-  if (!response.ok) throw new Error(result.error || 'บันทึกข้อมูลไม่สำเร็จ');
-  return result;
+export default function StoreApp() {
+  const [authReady, setAuthReady] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const configured = isSupabaseConfigured();
+
+  useEffect(() => {
+    if (!configured) return;
+    const supabase = getSupabaseBrowserClient();
+    let active = true;
+    void supabase.auth.getSession().then(({ data }) => {
+      if (active) {
+        setUser(data.session?.user ?? null);
+        setAuthReady(true);
+      }
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setAuthReady(true);
+    });
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, [configured]);
+
+  if (!configured) return <ConfigurationNotice />;
+  if (!authReady) return <div className="auth-screen"><span className="spinner" /><p>กำลังตรวจสอบการเข้าสู่ระบบ...</p></div>;
+  if (!user) return <LoginScreen />;
+
+  return <StoreWorkspace displayName={user.email ?? 'พนักงานร้าน'} onSignOut={() => getSupabaseBrowserClient().auth.signOut()} />;
 }
 
-export default function StoreApp({ displayName }: { displayName: string }) {
+function StoreWorkspace({ displayName, onSignOut }: { displayName: string; onSignOut: () => Promise<unknown> }) {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [month, setMonth] = useState(bangkokMonth);
   const [data, setData] = useState<StoreData>(EMPTY_DATA);
@@ -63,9 +82,7 @@ export default function StoreApp({ displayName }: { displayName: string }) {
   async function loadData(showSpinner = true) {
     if (showSpinner) setLoading(true);
     try {
-      const response = await fetch(`/api/store?month=${encodeURIComponent(month)}`, { cache: 'no-store' });
-      const result = await response.json() as StoreData & { error?: string };
-      if (!response.ok) throw new Error(result.error || 'โหลดข้อมูลไม่สำเร็จ');
+      const result = await loadStoreData(month);
       setData(result);
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'โหลดข้อมูลไม่สำเร็จ');
@@ -76,9 +93,7 @@ export default function StoreApp({ displayName }: { displayName: string }) {
     let cancelled = false;
     async function loadMonth() {
       try {
-        const response = await fetch(`/api/store?month=${encodeURIComponent(month)}`, { cache: 'no-store' });
-        const result = await response.json() as StoreData & { error?: string };
-        if (!response.ok) throw new Error(result.error || 'โหลดข้อมูลไม่สำเร็จ');
+        const result = await loadStoreData(month);
         if (!cancelled) setData(result);
       } catch (error) {
         if (!cancelled) {
@@ -138,7 +153,7 @@ export default function StoreApp({ displayName }: { displayName: string }) {
           <NavButton icon="□" label="สินค้า" tab="products" active={activeTab} onClick={setActiveTab} />
           <NavButton icon="⌖" label="รายการจัดส่ง" tab="delivery" active={activeTab} onClick={setActiveTab} />
         </nav>
-        <div className="sidebar-footer"><div className="user-avatar">{initials(displayUser).slice(0, 1)}</div><div><strong>{displayUser}</strong><small>ผู้ใช้งาน</small></div><a aria-label="ออกจากระบบ" href="/signout-with-chatgpt?return_to=/">↪</a></div>
+        <div className="sidebar-footer"><div className="user-avatar">{initials(displayUser).slice(0, 1)}</div><div><strong>{displayUser}</strong><small>ผู้ใช้งาน</small></div><button aria-label="ออกจากระบบ" onClick={() => void onSignOut()}>↪</button></div>
       </aside>
 
       <section className="workspace">
@@ -172,6 +187,45 @@ export default function StoreApp({ displayName }: { displayName: string }) {
       {toast && <div className="toast" role="status">{toast}</div>}
     </main>
   );
+}
+
+function LoginScreen() {
+  const [message, setMessage] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage('');
+    const values = new FormData(event.currentTarget);
+    const { error } = await getSupabaseBrowserClient().auth.signInWithPassword({
+      email: String(values.get('email') ?? '').trim(),
+      password: String(values.get('password') ?? ''),
+    });
+    if (error) setMessage('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+    setSubmitting(false);
+  }
+
+  return <main className="login-page">
+    <section className="login-card">
+      <div className="brand login-brand"><span className="brand-mark">ช</span><div><strong>ชงชา ออเดอร์</strong><small>ระบบจัดการออเดอร์รายเดือน</small></div></div>
+      <div className="login-copy"><p className="eyebrow">สำหรับพนักงานร้าน</p><h1>เข้าสู่ระบบ</h1><p>ใช้บัญชีพนักงานที่เจ้าของร้านสร้างให้</p></div>
+      <form onSubmit={submit} className="login-form">
+        <label><span>อีเมล</span><input name="email" type="email" autoComplete="username" required placeholder="employee@example.com" autoFocus /></label>
+        <label><span>รหัสผ่าน</span><input name="password" type="password" autoComplete="current-password" required minLength={6} placeholder="••••••••" /></label>
+        {message && <p className="login-error" role="alert">{message}</p>}
+        <button className="primary-button" disabled={submitting}>{submitting ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}</button>
+      </form>
+      <small className="login-help">ติดต่อเจ้าของร้านหากยังไม่มีบัญชีหรือจำรหัสผ่านไม่ได้</small>
+    </section>
+  </main>;
+}
+
+function ConfigurationNotice() {
+  return <main className="login-page"><section className="login-card configuration-card">
+    <div className="brand login-brand"><span className="brand-mark">ช</span><div><strong>ชงชา ออเดอร์</strong><small>Supabase setup required</small></div></div>
+    <div className="login-copy"><p className="eyebrow">ยังไม่พร้อมใช้งาน</p><h1>กรุณาเชื่อมต่อฐานข้อมูล</h1><p>ตั้งค่า NEXT_PUBLIC_SUPABASE_URL และ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ใน environment ของระบบ</p></div>
+  </section></main>;
 }
 
 function NavButton({ icon, label, tab, active, onClick }: { icon: string; label: string; tab: Tab; active: Tab; onClick: (tab: Tab) => void }) {

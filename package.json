@@ -9,7 +9,7 @@
     "dev": "node ./node_modules/next/dist/bin/next dev",
     "build": "node ./node_modules/next/dist/bin/next build",
     "start": "node ./node_modules/next/dist/bin/next start",
-    "lint": "node ./node_modules/eslint/bin/eslint.js . --ignore-pattern .next --ignore-pattern dist --ignore-pattern .wrangler"
+    "lint": "node ./node_modules/eslint/bin/eslint.js . --ignore-pattern .next --ignore-pattern .netlify --ignore-pattern dist --ignore-pattern .wrangler"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

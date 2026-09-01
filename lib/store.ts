@@ -36,7 +36,7 @@ type Row = Record<string, unknown>;
 
 function fail(error: { message: string; code?: string } | null, fallback: string): never | void {
   if (!error) return;
-  if (error.code === '23505') throw new Error('รหัสสินค้านี้มีอยู่แล้ว');
+  if (error.code === '23505') throw new Error('This product code already exists.');
   throw new Error(error.message || fallback);
 }
 
@@ -56,7 +56,7 @@ function bangkokDateTimeToIso(value: unknown): string | null {
   const localValue = String(value ?? '').trim();
   if (!localValue) return null;
   const date = new Date(`${localValue}:00+07:00`);
-  if (Number.isNaN(date.getTime())) throw new Error('วันเวลาที่จะโทรกลับไม่ถูกต้อง');
+  if (Number.isNaN(date.getTime())) throw new Error('The callback date and time are invalid.');
   return date.toISOString();
 }
 
@@ -74,10 +74,10 @@ export async function loadStoreData(month: string): Promise<StoreData> {
     `).eq('order_month', month).eq('customer.is_active', true).order('customer_id'),
   ]);
 
-  fail(customersResult.error, 'โหลดข้อมูลลูกค้าไม่สำเร็จ');
-  fail(productsResult.error, 'โหลดข้อมูลสินค้าไม่สำเร็จ');
-  fail(templatesResult.error, 'โหลดสินค้าประจำไม่สำเร็จ');
-  fail(ordersResult.error, 'โหลดออเดอร์ไม่สำเร็จ');
+  fail(customersResult.error, 'Could not load customers.');
+  fail(productsResult.error, 'Could not load products.');
+  fail(templatesResult.error, 'Could not load usual orders.');
+  fail(ordersResult.error, 'Could not load orders.');
 
   const templates = new Map<number, BasicItem[]>();
   for (const row of (templatesResult.data ?? []) as Row[]) {
@@ -150,13 +150,13 @@ export async function storeRequest(operation: string, payload: Record<string, un
     const result = payload.id
       ? await supabase.from('customers').update(record).eq('id', payload.id).select('id').single()
       : await supabase.from('customers').insert(record).select('id').single();
-    fail(result.error, 'บันทึกข้อมูลลูกค้าไม่สำเร็จ');
+    fail(result.error, 'Could not save the customer.');
     return result.data;
   }
 
   if (operation === 'archive_customer') {
     const result = await supabase.from('customers').update({ is_active: false }).eq('id', payload.id);
-    fail(result.error, 'เก็บลูกค้าไม่สำเร็จ');
+    fail(result.error, 'Could not archive the customer.');
     return result.data;
   }
 
@@ -165,13 +165,13 @@ export async function storeRequest(operation: string, payload: Record<string, un
     const result = payload.id
       ? await supabase.from('products').update(record).eq('id', payload.id).select('id').single()
       : await supabase.from('products').insert(record).select('id').single();
-    fail(result.error, 'บันทึกสินค้าไม่สำเร็จ');
+    fail(result.error, 'Could not save the product.');
     return result.data;
   }
 
   if (operation === 'archive_product') {
     const result = await supabase.from('products').update({ is_active: false }).eq('id', payload.id);
-    fail(result.error, 'เก็บสินค้าไม่สำเร็จ');
+    fail(result.error, 'Could not archive the product.');
     return result.data;
   }
 
@@ -180,13 +180,13 @@ export async function storeRequest(operation: string, payload: Record<string, un
       p_customer_id: payload.customerId,
       p_items: payload.items ?? [],
     });
-    fail(result.error, 'บันทึกสินค้าประจำไม่สำเร็จ');
+    fail(result.error, 'Could not save the usual order.');
     return result.data;
   }
 
   if (operation === 'generate_orders') {
     const result = await supabase.rpc('generate_monthly_orders', { p_order_month: payload.month });
-    fail(result.error, 'สร้างออเดอร์ประจำเดือนไม่สำเร็จ');
+    fail(result.error, 'Could not generate monthly orders.');
     return result.data;
   }
 
@@ -195,7 +195,7 @@ export async function storeRequest(operation: string, payload: Record<string, un
       p_customer_id: payload.customerId,
       p_order_month: payload.month,
     });
-    fail(result.error, 'สร้างออเดอร์ไม่สำเร็จ');
+    fail(result.error, 'Could not create the order.');
     return result.data;
   }
 
@@ -208,9 +208,9 @@ export async function storeRequest(operation: string, payload: Record<string, un
       p_contact_note: payload.contactNote ?? '',
       p_items: payload.items ?? [],
     });
-    fail(result.error, 'บันทึกออเดอร์ไม่สำเร็จ');
+    fail(result.error, 'Could not save the order.');
     return result.data;
   }
 
-  throw new Error('ไม่รู้จักคำสั่งนี้');
+  throw new Error('Unknown store operation.');
 }

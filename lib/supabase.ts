@@ -15,7 +15,7 @@ export function getSupabaseBrowserClient(): SupabaseClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !publishableKey) {
-    throw new Error('ยังไม่ได้ตั้งค่าการเชื่อมต่อ Supabase');
+    throw new Error('The Supabase connection is not configured.');
   }
 
   browserClient = createClient(url, publishableKey, {
